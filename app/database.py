@@ -3,6 +3,7 @@ import os
 import logging
 from dotenv import load_dotenv
 from sqlalchemy.exc import OperationalError
+from sqlalchemy import text  # Add import for text()
 
 
 load_dotenv()
@@ -24,37 +25,33 @@ try:
     with engine.connect() as _conn:
         pass
 except Exception as exc:
-    logging.warning(
-        "Initial connection to DATABASE_URL failed (%s): %s — falling back to local SQLite ./dev.db",
+    logging.error(
+        "Could not connect to DATABASE_URL (%s): %s\nPlease check:\n1. Your network connection\n2. VPN status if using one\n3. Supabase database status",
         DATABASE_URL,
         exc,
     )
-    engine = create_engine("sqlite:///./dev.db", echo=True)
+    raise  # Prevent fallback to SQLite so we can fix the real issue
 
 
 def create_db_and_tables():
     """Create database tables.
-
-    If the configured DATABASE_URL is unreachable (for example a remote
-    Postgres instance that cannot be resolved/reached), this function will
-    fall back to a local SQLite file database at `./dev.db` so the app can
-    continue running locally during development.
+    Attempts to connect to configured DATABASE_URL and create necessary tables.
     """
     global engine
+    logging.info(f"Attempting to connect to database with URL: {DATABASE_URL}")
+    
     try:
-        # Try an explicit connection first so we can detect unreachable hosts
-        # and fall back before any table creation attempts.
+        # Try an explicit connection first
         with engine.connect() as conn:
-            pass
+            # Test query to verify full connectivity
+            result = conn.execute(text("SELECT 1"))
+            logging.info("Successfully connected to database!")
+            
         SQLModel.metadata.create_all(engine)
-        logging.info("Database tables created using DATABASE_URL")
+        logging.info("✓ Database tables created successfully")
+        
     except Exception as exc:
-        # Don't crash the whole application on startup; log and fall back.
-        logging.warning(
-            "Could not connect to DATABASE_URL (%s): %s. Falling back to local SQLite ./dev.db",
-            DATABASE_URL,
-            exc,
-        )
-        engine = create_engine("sqlite:///./dev.db", echo=True)
-        SQLModel.metadata.create_all(engine)
-        logging.info("Database tables created using fallback SQLite database ./dev.db")
+        logging.error(f"Database connection failed: {exc}")
+        logging.error("Check your database URL and network connection")
+        logging.error("Database URL format should be: postgresql://user:password@host:5432/dbname")
+        raise  # Re-raise to prevent silent failures
